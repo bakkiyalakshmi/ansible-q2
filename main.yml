@@ -1,0 +1,106 @@
+---
+# This playbook Q2.
+
+- name: ansible task
+  hosts: ec2_devops
+  remote_user: root
+  become: yes
+  become_method: sudo
+  vars:
+      firewall_open_ports: [80, 8080, 3306]
+      firewall_open_services: ["http", "https"]
+      download_url: http://download.oracle.com/otn-pub/java/jdk/8u5-b13/jdk-8u5-linux-x64.tar.gz
+      download_folder: /opt
+      java_name: "{{download_folder}}/jdk1.8.0_05"
+      java_archive: "{{download_folder}}/jdk-8u5-linux-x64.tar.gz"
+      
+    _nslookup_package:
+      Alpine: bind-tools
+      Archlinux: dnsutils
+      Debian: dnsutils
+      RedHat: bind-utils
+      nslookup_package: "{{ _nslookup_package[ansible_os_family] }}"
+      
+       
+  - name: Install apache packages  
+    yum:
+      name: httpd
+      state: present
+  - name: ensure httpd is running
+    service:
+      name: httpd 
+      state: started
+  - name: Open port 80 for http access
+    firewalld:
+      service: http
+      permanent: true
+      state: enabled
+  - name: Restart the firewalld service to load in the firewall changes
+    service: 
+      name: firewalld 
+      state: restarted
+      
+  roles: 
+    - selinux   
+    - tomcat
+    - db
+    
+  - name : Install Telnet using yum
+    yum : 
+    name: telnet 
+    state: present 
+    
+    
+  - name: Install cURL on CentOS-flavours
+    yum:
+    name: curl
+    state: present
+    
+    
+  - name: Verify and install nslookup
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+    - name: install nslookup
+      package:
+        name: "{{ nslookup_package }}"
+        state: present
+
+    - name: test resolving www.google.com
+      command: nslookup www.google.com
+
+    - name: Open ports with system-config-securitylevel
+      command: "lokkit -q -p {{item}}:tcp"
+      with_items: "{{firewall_open_services}}"
+      when: ansible_os_family == 'RedHat' and ansible_distribution_major_version|int == 5
+      tags: firewall
+
+    - name: Open ports with system-config-firewall
+      command: "lokkit -s {{item}}"
+      with_items: "{{firewall_open_services}}"
+      when: ansible_os_family == 'RedHat' and ansible_distribution_major_version|int == 6
+      tags: firewall
+
+    - name: Open ports with firewalld
+      firewalld: "service={{item}} permanent=true immediate=true state=enabled"
+      with_items: "{{firewall_open_services}}"
+      when: ansible_os_family == 'RedHat' and ansible_distribution_major_version|int >= 7
+      tags: firewall  
+
+    - name: Download Java
+      command: "wget -q -O {{java_archive}} --no-check-certificate --no-cookies --header 'Cookie: oraclelicense=accept-securebackup-cookie' {{download_url}} creates={{java_archive}}"
+
+    - name: Unpack archive
+      command: "tar -zxf {{java_archive}} -C {{download_folder}} creates={{java_name}}"
+
+    - name: Fix ownership
+      file: state=directory path={{java_name}} owner=root group=root recurse=yes
+
+    - name: Make Java available for system
+      command: 'alternatives --install "/usr/bin/java" "java" "{{java_name}}/bin/java" 2000'
+
+    - name: Clean up
+      file: state=absent path={{java_archive}} 
+
+   
